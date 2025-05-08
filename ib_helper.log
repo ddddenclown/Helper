@@ -1,0 +1,272 @@
+2025-04-14 16:13:48,505 - ERROR - Ошибка подключения к Ollama: Сервис Ollama не отвечает
+2025-04-14 16:16:11,651 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:16:19,756 - INFO - Начата обработка запроса
+2025-04-14 16:16:20,164 - WARNING - Буфер обмена пуст
+2025-04-14 16:16:20,164 - WARNING - Не удалось получить выделенный текст
+2025-04-14 16:17:06,416 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:17:11,712 - INFO - Начата обработка запроса
+2025-04-14 16:17:12,121 - WARNING - Буфер обмена пуст
+2025-04-14 16:17:12,121 - WARNING - Не удалось получить выделенный текст
+2025-04-14 16:19:45,216 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:19:51,003 - INFO - Начата обработка запроса
+2025-04-14 16:19:51,712 - WARNING - Буфер обмена пуст
+2025-04-14 16:19:51,712 - WARNING - Не удалось получить выделенный текст
+2025-04-14 16:25:06,879 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:25:11,944 - INFO - Начата обработка запроса
+2025-04-14 16:25:11,945 - INFO - Текст из буфера обмена: import pyperclip
+import keyboard
+import subproce...
+2025-04-14 16:25:11,946 - INFO - Запрос к локальной модели: Информационная безопасность. Краткий ответ на вопрос: import pyperclip
+import keyboard
+import subprocess
+import tkinter as tk
+from tkinter import ttk
+import threading
+import time
+import queue
+import logging
+import os
+
+# Конфигурация
+OLLAMA_PATH = r"C:\Users\Дмитрий\AppData\Local\Programs\Ollama\ollama.exe"
+MODEL_NAME = "mistral"
+HOTKEY = "ctrl+alt+q"
+LOG_FILE = "ib_helper.log"
+REQUEST_TIMEOUT = 30  # Таймаут запроса в секундах
+RETRY_ATTEMPTS = 3    # Количество повторных попыток
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+
+class IBHelperApp:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.withdraw()  # Скрываем основное окно
+        self.tooltip = None
+        self.request_queue = queue.Queue()
+        self.setup_hotkey()
+
+    def setup_hotkey(self):
+        """Регистрация горячей клавиши"""
+        try:
+            keyboard.add_hotkey(HOTKEY, self.process_request)
+            logging.info(f"Горячая клавиша '{HOTKEY}' зарегистрирована")
+        except Exception as e:
+            logging.error(f"Ошибка регистрации горячей клавиши: {e}")
+            self.show_notification("Ошибка", "Не удалось зарегистрировать горячую клавишу")
+
+    def process_request(self):
+        """Обработка запроса по горячей клавише"""
+        logging.info("Начата обработка запроса")
+        
+        selected_text = self.get_selected_text()
+        if not selected_text:
+            logging.warning("Не удалось получить выделенный текст")
+            self.show_notification("Ошибка", "Не удалось получить выделенный текст. Убедитесь, что текст выделен и доступен для копирования.")
+            return
+            
+        # Запуск обработки в отдельном потоке
+        threading.Thread(
+            target=self.worker_thread,
+            args=(selected_text,),
+            daemon=True
+        ).start()
+
+    def worker_thread(self, text):
+        """Потоковая обработка запросов к локальной модели"""
+        answer = self.ask_local_model(text)
+        self.request_queue.put(answer)
+
+    def ask_local_model(self, question):
+        """Получение ответа от локальной модели через ollama.exe"""
+        prompt = f"Информационная безопасность. Краткий ответ на вопрос: {question}"
+        logging.info(f"Запрос к локальной модели: {prompt}")
+        
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                result = subprocess.run(
+                    [OLLAMA_PATH, "run", MODEL_NAME],
+                    input=prompt.encode('utf-8'),
+                    capture_output=True,
+                    timeout=REQUEST_TIMEOUT
+                )
+                
+                if result.returncode == 0:
+                    answer = result.stdout.decode('utf-8').strip()
+                    logging.info(f"Получен ответ: {answer[:100]}...")
+                    return answer
+                else:
+                    logging.warning(f"Модель вернула ошибку: {result.stderr.decode('utf-8')}")
+            except Exception as e:
+                logging.warning(f"Попытка {attempt+1} не удалась: {str(e)}")
+                time.sleep(1)
+        
+        return "Ошибка: Нет ответа от модели"
+
+    def get_selected_text(self):
+        """Улучшенное получение выделенного текста"""
+        try:
+            # Попытка получить текущий буфер обмена
+            clipboard_content = pyperclip.paste().strip()
+            if clipboard_content:
+                logging.info(f"Текст из буфера обмена: {clipboard_content[:50]}...")
+                return clipboard_content
+            
+            # Если буфер пуст, пытаемся скопировать выделенный текст
+            logging.debug("Буфер пуст, выполняем программное копирование")
+            keyboard.send('ctrl+c')
+            time.sleep(0.5)  # Увеличенная задержка
+            
+            # Повторное чтение буфера
+            clipboard_content = pyperclip.paste().strip()
+            if clipboard_content:
+                logging.info(f"Скопирован текст: {clipboard_content[:50]}...")
+                return clipboard_content
+            else:
+                logging.warning("Не удалось получить текст после копирования")
+                return None
+                
+        except Exception as e:
+            logging.error(f"Ошибка при получении текста: {e}")
+            return None
+
+    def show_notification(self, title, message):
+        """Показ уведомления"""
+        def create_popup():
+            popup = tk.Toplevel()
+            popup.title(title)
+            popup.overrideredirect(True)
+            popup.attributes("-topmost", True)
+            popup.geometry("+100+100")
+            
+            style = ttk.Style()
+            style.configure("Popup.TLabel",
+                          background="#333",
+                          foreground="white",
+                          font=("Arial", 10),
+                          padding=10)
+            
+            label = ttk.Label(popup, text=message, style="Popup.TLabel")
+            label.pack()
+            
+            popup.after(3000, popup.destroy)
+        
+        self.root.after(0, create_popup)
+
+    def check_queue(self):
+        """Проверка очереди ответов"""
+        try:
+            answer = self.request_queue.get_nowait()
+            self.show_tooltip(answer)
+        except queue.Empty:
+            pass
+        finally:
+            self.root.after(100, self.check_queue)
+
+    def show_tooltip(self, text):
+        """Отображение ответа"""
+        def create_tooltip():
+            if self.tooltip:
+                self.tooltip.destroy()
+                
+            self.tooltip = tk.Toplevel(self.root)
+            self.tooltip.overrideredirect(True)
+            self.tooltip.attributes("-topmost", True)
+            self.tooltip.geometry("+100+100")
+            
+            # Анимация появления
+            self.tooltip.attributes("-alpha", 0.0)
+            for i in range(10):
+                self.tooltip.attributes("-alpha", (i+1)/10)
+                self.tooltip.update()
+                time.sleep(0.02)
+            
+            style = ttk.Style()
+            style.configure("Tooltip.TLabel",
+                          background="#2d2d2d",
+                          foreground="#e0e0e0",
+                          font=("Arial", 10),
+                          padding=10)
+            
+            label = ttk.Label(self.tooltip, text=text, style="Tooltip.TLabel")
+            label.pack()
+            label.bind("<Button-1>", lambda e: self.tooltip.destroy())  # Закрытие по клику
+            
+            # Автоматическое удаление
+            self.tooltip.after(7000, self.tooltip.destroy)
+        
+        self.root.after(0, create_tooltip)
+
+    def run(self):
+        """Запуск приложения"""
+        self.root.after(100, self.check_queue)
+        try:
+            self.root.mainloop()
+        except Exception as e:
+            logging.error(f"Критическая ошибка: {e}")
+
+if __name__ == "__main__":
+    # Проверка существования ollama.exe
+    if not os.path.exists(OLLAMA_PATH):
+        logging.error(f"Файл ollama.exe не найден по пути: {OLLAMA_PATH}")
+        exit(1)
+    
+    app = IBHelperApp()
+    app.run()
+2025-04-14 16:25:41,988 - WARNING - Попытка 1 не удалась: Command '['C:\\Users\\Дмитрий\\AppData\\Local\\Programs\\Ollama\\ollama.exe', 'run', 'mistral']' timed out after 30 seconds
+2025-04-14 16:25:51,208 - INFO - Получен ответ: Этот код представляет собой приложение, написанное на языке программирования Python и использующее б...
+2025-04-14 16:26:29,274 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:26:32,234 - INFO - Начата обработка запроса
+2025-04-14 16:26:32,234 - INFO - Текст из буфера обмена: сколько лет живут бегемоты?...
+2025-04-14 16:26:32,235 - INFO - Запрос к локальной модели: Информационная безопасность. Краткий ответ на вопрос: сколько лет живут бегемоты?
+2025-04-14 16:26:37,783 - INFO - Получен ответ: Бегемоты в природе обычно живут до 40-60 лет, но в неволе могут проживать дольше - до 70-80 лет. В с...
+2025-04-14 16:27:17,200 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:27:20,461 - INFO - Начата обработка запроса
+2025-04-14 16:27:20,462 - INFO - Текст из буфера обмена: сколько лет живут бегемоты?...
+2025-04-14 16:27:20,462 - INFO - Запрос к локальной модели: Информационная безопасность. Очень краткий ответ на вопрос: сколько лет живут бегемоты?
+2025-04-14 16:27:25,255 - INFO - Получен ответ: Бегемоты обычно живут примерно 40-50 лет, хотя могут доживать до 60 или даже 70 лет. Это зависит от ...
+2025-04-14 16:27:34,169 - INFO - Начата обработка запроса
+2025-04-14 16:27:34,169 - INFO - Текст из буфера обмена: что такое ips /ids...
+2025-04-14 16:27:34,169 - INFO - Запрос к локальной модели: Информационная безопасность. Очень краткий ответ на вопрос: что такое ips /ids
+2025-04-14 16:27:43,686 - INFO - Получен ответ: IPS (Intrusion Prevention System) и IDS (Intrusion Detection System) – это компьютерные системы, кот...
+2025-04-14 16:28:37,397 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:28:42,230 - INFO - Начата обработка запроса
+2025-04-14 16:28:42,231 - INFO - Текст из буфера обмена: Как защитить компьютер от вирусов?...
+2025-04-14 16:28:42,231 - INFO - Запрос к локальной модели: Информационная безопасность.Максимально коротко отвечай на вопрос. Как защитить компьютер от вирусов?
+2025-04-14 16:29:09,107 - INFO - Получен ответ: 1. Установите и обновляйте антивирусное программное обеспечение.
+
+2. Используйте пароли для всех уче...
+2025-04-14 16:30:21,639 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:30:24,227 - INFO - Начата обработка запроса
+2025-04-14 16:30:24,228 - INFO - Текст из буфера обмена: что такое ips /ids...
+2025-04-14 16:30:24,228 - INFO - Запрос к локальной модели: Информационная безопасность.Максимально коротко отвечай на вопрос(не более 1 предложения). что такое ips /ids
+2025-04-14 16:30:28,928 - INFO - Получен ответ: IPS (Intrusion Prevention System) и IDS (Intrusion Detection System) - системы обнаруживания и предо...
+2025-04-14 16:36:41,433 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:36:50,554 - INFO - Начата обработка запроса
+2025-04-14 16:36:50,555 - INFO - Текст из буфера обмена: напиши мяу...
+2025-04-14 16:36:50,555 - INFO - Запрос к локальной модели: Информационная безопасность.Максимально коротко отвечай на вопрос(не более 1 предложения). напиши мяу
+2025-04-14 16:36:57,265 - INFO - Получен ответ: Приватность и безопасность данных – основополагающие задачи цифрового мира....
+2025-04-14 16:37:13,556 - INFO - Начата обработка запроса
+2025-04-14 16:37:13,556 - INFO - Текст из буфера обмена: что такое purple team...
+2025-04-14 16:37:13,557 - INFO - Запрос к локальной модели: Информационная безопасность.Максимально коротко отвечай на вопрос(не более 1 предложения). что такое purple team
+2025-04-14 16:37:16,999 - INFO - Получен ответ: Команда, которая осуществляет совместные усилия по проверке системы защиты и атаке с целью улучшения...
+2025-04-14 16:42:37,119 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:43:41,875 - INFO - Горячая клавиша 'ctrl+alt+q' зарегистрирована
+2025-04-14 16:43:52,966 - INFO - Начата обработка запроса
+2025-04-14 16:43:52,967 - INFO - Текст из буфера обмена: что такое blue team...
+2025-04-14 16:43:52,968 - INFO - Запрос к локальной модели: Информационная безопасность.Максимально коротко отвечай на вопрос(не более 1 предложения). что такое blue team
+2025-04-14 16:43:59,502 - INFO - Получен ответ: Оборонительные силы (team, defenders) в контексте информационной безопасности....
+2025-05-08 12:25:17,277 - INFO - Горячая клавиша 'ctrl+alt+j' зарегистрирована
+2025-05-08 12:25:21,486 - INFO - Начата обработка запроса
+2025-05-08 12:25:21,487 - INFO - Текст из буфера обмена: label = ttk.Label(self.tooltip, text=text, style="...
+2025-05-08 12:25:21,487 - INFO - Запрос к локальной модели: Максимально коротко отвечай на вопрос(не более 3 предложений). label = ttk.Label(self.tooltip, text=text, style="Tooltip.TLabel")
+2025-05-08 12:25:27,170 - INFO - Получен ответ: 1. Создайте Label с именем `"Tooltip.TLabel"` и укажите текст через `text` аргумент.
+
+2. Этот `Label...
